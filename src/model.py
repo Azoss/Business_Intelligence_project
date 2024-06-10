@@ -197,3 +197,10 @@ class StockMixer(nn.Module):
         z = self.time_fc_(z)
         return y + z
 
+class LinearRegressionModel(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(LinearRegressionModel, self).__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+    
+    def forward(self, x):
+        return self.linear(x)

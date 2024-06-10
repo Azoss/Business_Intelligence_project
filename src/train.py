@@ -41,13 +41,13 @@ if market_name == "SP500":
             gt_data[ticket][row] = (data[ticket][row][-1] - data[ticket][row - steps][-1]) / \
                                    data[ticket][row - steps][-1]
 else:
-    with open(os.path.join(dataset_path, "eod_data.pkl"), "rb") as f:
+    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/StockMixer/dataset/NASDAQ/eod_data.pkl"), "rb") as f:
         eod_data = pickle.load(f)
-    with open(os.path.join(dataset_path, "mask_data.pkl"), "rb") as f:
+    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/StockMixer/dataset/NASDAQ/mask_data.pkl"), "rb") as f:
         mask_data = pickle.load(f)
-    with open(os.path.join(dataset_path, "gt_data.pkl"), "rb") as f:
+    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/StockMixer/dataset/NASDAQ/gt_data.pkl"), "rb") as f:
         gt_data = pickle.load(f)
-    with open(os.path.join(dataset_path, "price_data.pkl"), "rb") as f:
+    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/StockMixer/dataset/NASDAQ/price_data.pkl"), "rb") as f:
         price_data = pickle.load(f)
 
 trade_dates = mask_data.shape[1]
