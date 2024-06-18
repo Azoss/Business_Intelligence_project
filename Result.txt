@@ -1,0 +1,56 @@
+
+1)Linear Regression
+Best Valid performance:
+ mse:4.76e-04, IC:1.08e-02, RIC:-3.56e-04, prec@10:1.22e-03, SR:-5.80e-02
+Best Test performance:
+ mse:3.82e-04, IC:6.04e-03, RIC:-1.23e-04, prec@10:2.84e-03, SR:-5.99e-02
+
+
+2)KNN
+Best Valid performance:
+ mse:9.03e-04, IC:2.71e-02, RIC:2.46e-01, prec@10:5.26e-01, SR:2.43e+00
+Best Test performance:
+ mse:8.14e-04, IC:-1.54e-03, RIC:-2.57e-02, prec@10:5.22e-01, SR:-2.77e-01
+
+
+3)TST
+Best Valid performance:
+ mse:2.45e+01, IC:-1.95e-02, RIC:-2.23e-01, prec@10:5.31e-01, SR:-3.62e+00
+Best Test performance:
+ mse:5.73e+01, IC:2.34e-03, RIC:3.64e-02, prec@10:4.48e-01, SR:-8.28e+00
+
+
+
+4)MLP
+Best Valid performance:
+ mse:1.41e-03, IC:-2.34e-02, RIC:-1.85e-01, prec@10:5.31e-01, SR:3.85e-01
+Best Test performance:
+ mse:1.26e-03, IC:-4.87e-03, RIC:-6.07e-02, prec@10:5.37e-01, SR:-6.20e-01
+
+
+Analisis:
+1. Mean Squared Error (MSE) :
+	- Terendah Linear Regression pada test Valid Perfomance (4.76 x 10^-4) dan Test (3.82 x 10^10-4) 
+
+2. Information Coefficient (IC) :
+	- Tertinggi: KNN pada validasi (2.71 x 10^-2)
+
+3. Rank Information Coefficient (RIC) :
+	- Tertinggi : KNN pada Valid (RIC:2.46e-01)
+
+4. Precision at 10 (prec@10) :
+	- Tertinggi: KNN pada Valid (5.26e-01) dan test (5.22e-01)
+
+5. Sharpe Ratio (SR) :
+	- Tertinggi : KNN pada Valid (2.43e+00)
+	
+
+
+Kesimpulan:
+Berdasarkan metrik yang diberikan, KNN menunjukkan kinerja yang paling baik secara keseluruhan, terutama pada metrik-metrik seperti IC, RIC, prec@10, dan SR pada validasi. Meskipun Linear Regression memiliki MSE yang lebih rendah, metrik lainnya seperti IC, RIC, dan SR menunjukkan bahwa KNN lebih unggul dalam hal lain.
+
+
+
+
+
+
