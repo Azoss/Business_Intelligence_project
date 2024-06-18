@@ -1,28 +1,49 @@
 import torch
+import math
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+
 
 acv = nn.GELU()
 
-def get_loss(prediction, ground_truth, base_price, mask, batch_size, alpha):
-    device = prediction.device
-    all_one = torch.ones(batch_size, 1, dtype=torch.float32).to(device)
-    return_ratio = torch.div(torch.sub(prediction, base_price), base_price)
-    reg_loss = F.mse_loss(return_ratio * mask, ground_truth * mask)
-    pre_pw_dif = torch.sub(
-        return_ratio @ all_one.t(),
-        all_one @ return_ratio.t()
-    )
-    gt_pw_dif = torch.sub(
-        all_one @ ground_truth.t(),
-        ground_truth @ all_one.t()
-    )
-    mask_pw = mask @ mask.t()
-    rank_loss = torch.mean(
-        F.relu(pre_pw_dif * gt_pw_dif * mask_pw)
-    )
-    loss = reg_loss + alpha * rank_loss
-    return loss, reg_loss, rank_loss, return_ratio
+# def get_loss(prediction, ground_truth, base_price, mask, batch_size, alpha):
+#     device = prediction.device
+#     all_one = torch.ones(batch_size, 1, dtype=torch.float32).to(device)
+#     return_ratio = torch.div(torch.sub(prediction, base_price), base_price)
+#     reg_loss = F.mse_loss(return_ratio * mask, ground_truth * mask)
+#     pre_pw_dif = torch.sub(
+#         return_ratio @ all_one.t(),
+#         all_one @ return_ratio.t()
+#     )
+#     gt_pw_dif = torch.sub(
+#         all_one @ ground_truth.t(),
+#         ground_truth @ all_one.t()
+#     )
+#     mask_pw = mask @ mask.t()
+#     rank_loss = torch.mean(
+#         F.relu(pre_pw_dif * gt_pw_dif * mask_pw)
+#     )
+#     loss = reg_loss + alpha * rank_loss
+#     return loss, reg_loss, rank_loss, return_ratio
+
+def get_loss(prediction, gt_batch, price_batch, mask_batch, stock_num, alpha):
+    # Calculating the return ratio
+    return_ratio = prediction / price_batch
+
+    # Create a tensor of ones with appropriate dimensions
+    all_one = torch.ones(return_ratio.size(1), 1, device=prediction.device)  # Change to (16, 1) based on return_ratio dimensions
+
+    # Adjust target to match the prediction dimensions
+    gt_batch = gt_batch.expand_as(prediction)
+
+    # Calculate the different losses
+    mse_loss = nn.MSELoss()(prediction, gt_batch)
+    reg_loss = (return_ratio @ all_one).mean()  # Adjusted to ensure proper dimensions for matrix multiplication
+    rank_loss = (return_ratio - gt_batch).abs().mean()
+
+    total_loss = mse_loss + alpha * (reg_loss + rank_loss)
+    return total_loss, reg_loss, rank_loss, return_ratio
 
 
 class MixerBlock(nn.Module):
@@ -197,10 +218,59 @@ class StockMixer(nn.Module):
         z = self.time_fc_(z)
         return y + z
 
-class LinearRegressionModel(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(LinearRegressionModel, self).__init__()
-        self.linear = nn.Linear(input_dim, output_dim)
-    
+from sklearn.neighbors import KNeighborsRegressor
+
+class KNNStockMixer:
+    def __init__(self, n_neighbors=5):
+        self.n_neighbors = n_neighbors
+        self.knn = KNeighborsRegressor(n_neighbors=n_neighbors)
+
+    def fit(self, X, y):
+        X = X.reshape(X.shape[0], -1).cpu().numpy()
+        y = y.cpu().numpy()
+        self.knn.fit(X, y)
+
+    def predict(self, X):
+        X = X.reshape(X.shape[0], -1).cpu().numpy()
+        preds = self.knn.predict(X)
+        return torch.tensor(preds, device=torch.device('cuda') if torch.cuda.is_available() else 'cpu').float()
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class TransformerStockMixer(nn.Module):
+    def __init__(self, input_dim, nhead, num_encoder_layers, dim_feedforward, dropout):
+        super(TransformerStockMixer, self).__init__()
+        self.model_type = 'Transformer'
+        self.pos_encoder = PositionalEncoding(input_dim, dropout)
+        encoder_layers = TransformerEncoderLayer(input_dim, nhead, dim_feedforward, dropout)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, num_encoder_layers)
+        self.encoder = nn.Linear(input_dim, input_dim)
+        self.decoder = nn.Linear(input_dim, 1)
+
+    def forward(self, src):
+        src = self.encoder(src) * math.sqrt(self.ninp)
+        src = self.pos_encoder(src)
+        output = self.transformer_encoder(src)
+        output = self.decoder(output)
+        return output
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
     def forward(self, x):
-        return self.linear(x)
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)

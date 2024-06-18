@@ -4,20 +4,22 @@ import os
 import torch as torch
 from load_data import load_EOD_data
 from evaluator import evaluate
-from model import get_loss, StockMixer
+from model import get_loss, StockMixer, KNNStockMixer
 import pickle
+
 
 
 np.random.seed(123456789)
 torch.random.manual_seed(12345678)
 device = torch.device("cuda") if torch.cuda.is_available() else 'cpu'
 
+# Load data
 data_path = '../dataset'
 market_name = 'NASDAQ'
 relation_name = 'wikidata'
 stock_num = 1026
 lookback_length = 16
-epochs = 100
+epochs = 15
 valid_index = 756
 test_index = 1008
 fea_num = 5
@@ -29,42 +31,29 @@ scale_factor = 3
 activation = 'GELU'
 
 dataset_path = '../dataset/' + market_name
-if market_name == "SP500":
-    data = np.load('../dataset/SP500/SP500.npy')
-    data = data[:, 915:, :]
-    price_data = data[:, :, -1]
-    mask_data = np.ones((data.shape[0], data.shape[1]))
-    eod_data = data
-    gt_data = np.zeros((data.shape[0], data.shape[1]))
-    for ticket in range(0, data.shape[0]):
-        for row in range(1, data.shape[1]):
-            gt_data[ticket][row] = (data[ticket][row][-1] - data[ticket][row - steps][-1]) / \
-                                   data[ticket][row - steps][-1]
-else:
-    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/eod_data.pkl"), "rb") as f:
+with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/eod_data.pkl"), "rb") as f:
         eod_data = pickle.load(f)
-    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/mask_data.pkl"), "rb") as f:
-        mask_data = pickle.load(f)
-    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/gt_data.pkl"), "rb") as f:
-        gt_data = pickle.load(f)
-    with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/price_data.pkl"), "rb") as f:
-        price_data = pickle.load(f)
+with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/mask_data.pkl"), "rb") as f:
+    mask_data = pickle.load(f)
+with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/gt_data.pkl"), "rb") as f:
+    gt_data = pickle.load(f)
+with open(os.path.join(dataset_path, "/media/isk/New Volume/Kuliah/Semester_6/Business Intelligence/Code/Business_Intelligence_project/dataset/NASDAQ/price_data.pkl"), "rb") as f:
+    price_data = pickle.load(f)
 
 trade_dates = mask_data.shape[1]
-model = StockMixer(
-    stocks=stock_num,
-    time_steps=lookback_length,
-    channels=fea_num,
-    market=market_num,
-    scale=scale_factor
-).to(device)
+model = KNNStockMixer(n_neighbors=5)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-best_valid_loss = np.inf
-best_valid_perf = None
-best_test_perf = None
-batch_offsets = np.arange(start=0, stop=valid_index, dtype=int)
-
+def get_batch(offset=None):
+    if offset is None:
+        offset = random.randrange(0, valid_index)
+    seq_len = lookback_length
+    mask_batch = mask_data[:, offset: offset + seq_len + steps]
+    mask_batch = np.min(mask_batch, axis=1)
+    return (
+        eod_data[:, offset:offset + seq_len, :],
+        np.expand_dims(mask_batch, axis=1),
+        np.expand_dims(price_data[:, offset + seq_len - 1], axis=1),
+        np.expand_dims(gt_data[:, offset + seq_len + steps - 1], axis=1))
 
 def validate(start_index, end_index):
     with torch.no_grad():
@@ -76,11 +65,10 @@ def validate(start_index, end_index):
         rank_loss = 0.
         for cur_offset in range(start_index - lookback_length - steps + 1, end_index - lookback_length - steps + 1):
             data_batch, mask_batch, price_batch, gt_batch = map(
-
                 lambda x: torch.Tensor(x).to(device),
                 get_batch(cur_offset)
             )
-            prediction = model(data_batch)
+            prediction = model.predict(data_batch)
             cur_loss, cur_reg_loss, cur_rank_loss, cur_rr = get_loss(prediction, gt_batch, price_batch, mask_batch,
                                                                      stock_num, alpha)
             loss += cur_loss.item()
@@ -95,46 +83,35 @@ def validate(start_index, end_index):
         cur_valid_perf = evaluate(cur_valid_pred, cur_valid_gt, cur_valid_mask)
     return loss, reg_loss, rank_loss, cur_valid_perf
 
-
-def get_batch(offset=None):
-    if offset is None:
-        offset = random.randrange(0, valid_index)
-    seq_len = lookback_length
-    mask_batch = mask_data[:, offset: offset + seq_len + steps]
-    mask_batch = np.min(mask_batch, axis=1)
-    return (
-        eod_data[:, offset:offset + seq_len, :],
-        np.expand_dims(mask_batch, axis=1),
-        np.expand_dims(price_data[:, offset + seq_len - 1], axis=1),
-        np.expand_dims(gt_data[:, offset + seq_len + steps - 1], axis=1))
-
+# Training
+best_valid_loss = float('inf')
+best_valid_perf = None
+best_test_perf = None
 
 for epoch in range(epochs):
     print("epoch{}##########################################################".format(epoch + 1))
+    batch_offsets = np.arange(start=0, stop=valid_index, dtype=int)
     np.random.shuffle(batch_offsets)
     tra_loss = 0.0
     tra_reg_loss = 0.0
     tra_rank_loss = 0.0
+
+    # Prepare the training data for fitting KNN
+    train_data = []
+    train_gt = []
+
     for j in range(valid_index - lookback_length - steps + 1):
         data_batch, mask_batch, price_batch, gt_batch = map(
             lambda x: torch.Tensor(x).to(device),
             get_batch(batch_offsets[j])
         )
-        optimizer.zero_grad()
-        prediction = model(data_batch)
-        cur_loss, cur_reg_loss, cur_rank_loss, _ = get_loss(prediction, gt_batch, price_batch, mask_batch,
-                                                            stock_num, alpha)
-        cur_loss = cur_loss
-        cur_loss.backward()
-        optimizer.step()
+        train_data.append(data_batch)
+        train_gt.append(gt_batch)
 
-        tra_loss += cur_loss.item()
-        tra_reg_loss += cur_reg_loss.item()
-        tra_rank_loss += cur_rank_loss.item()
-    tra_loss = tra_loss / (valid_index - lookback_length - steps + 1)
-    tra_reg_loss = tra_reg_loss / (valid_index - lookback_length - steps + 1)
-    tra_rank_loss = tra_rank_loss / (valid_index - lookback_length - steps + 1)
-    print('Train : loss:{:.2e}  =  {:.2e} + alpha*{:.2e}'.format(tra_loss, tra_reg_loss, tra_rank_loss))
+    train_data = torch.cat(train_data, dim=0)
+    train_gt = torch.cat(train_gt, dim=0)
+
+    model.fit(train_data, train_gt)
 
     val_loss, val_reg_loss, val_rank_loss, val_perf = validate(valid_index, test_index)
     print('Valid : loss:{:.2e}  =  {:.2e} + alpha*{:.2e}'.format(val_loss, val_reg_loss, val_rank_loss))
@@ -151,3 +128,8 @@ for epoch in range(epochs):
                                                      val_perf['RIC'], val_perf['prec_10'], val_perf['sharpe5']))
     print('Test performance:\n', 'mse:{:.2e}, IC:{:.2e}, RIC:{:.2e}, prec@10:{:.2e}, SR:{:.2e}'.format(test_perf['mse'], test_perf['IC'],
                                                                             test_perf['RIC'], test_perf['prec_10'], test_perf['sharpe5']), '\n\n')
+
+print('Best Valid performance:\n', 'mse:{:.2e}, IC:{:.2e}, RIC:{:.2e}, prec@10:{:.2e}, SR:{:.2e}'.format(
+    best_valid_perf['mse'], best_valid_perf['IC'], best_valid_perf['RIC'], best_valid_perf['prec_10'], best_valid_perf['sharpe5']))
+print('Best Test performance:\n', 'mse:{:.2e}, IC:{:.2e}, RIC:{:.2e}, prec@10:{:.2e}, SR:{:.2e}'.format(
+    best_test_perf['mse'], best_test_perf['IC'], best_test_perf['RIC'], best_test_perf['prec_10'], best_test_perf['sharpe5']))
